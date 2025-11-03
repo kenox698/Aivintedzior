@@ -1,6 +1,5 @@
 discord.py
-selenium
+playwright
 flask
 pytz
 gtts
-webdriver-manager
