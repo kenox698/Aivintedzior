@@ -1,11 +1,7 @@
 import discord
 from discord.ext import commands, tasks
 from discord.ui import Button, View
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager  # AUTO POBIERA CHROMEDRIVER – ZERO CRASH!
+from playwright.sync_api import sync_playwright
 import os
 import random
 import threading
@@ -24,63 +20,55 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 channel = None
-current_search = {"query": "", "size": "", "max_price": 200}  # Default
+current_search = {"query": "", "size": "", "max_price": 200}
 
 # === FLASK KEEP-ALIVE ===
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Vinted Universal Sniper NIEŚMIERTELNY – jebie oferty 24/7, kurwa!"
+def home(): return "Vinted Playwright Sniper NIEŚMIERTELNY – jebie oferty 24/7!"
 threading.Thread(target=app.run, args=('0.0.0.0', int(os.environ.get('PORT', 8080))), daemon=True).start()
 
-# === SELENIUM Z AUTO-DRIVER ===
-def get_driver():
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-gpu')
-    options.add_argument('--remote-debugging-port=9222')
-    service = Service(ChromeDriverManager().install())  # AUTO DOWNLOAD CHROMEDRIVER!
-    driver = webdriver.Chrome(service=service, options=options)
-    return driver
-
-driver = get_driver()  # INIT RAZ – BOT NIEŚMIERTELNY!
+# === PLAYWRIGHT GLOBAL ===
+playwright = sync_playwright().start()
+browser = playwright.chromium.launch(headless=True)
+context = browser.new_context(viewport={'width': 1920, 'height': 1080})
+page = context.new_page()
 
 # === KRAJE VINTED ===
-countries = ['pl', 'de', 'fr', 'gb', 'es', 'it', 'nl', 'be', 'at', 'cz']  # GLOBAL EU!
+countries = ['pl', 'de', 'fr', 'gb', 'es', 'it', 'nl', 'be', 'at', 'cz']
 
 def search_product(query, size, max_price):
     deals = []
     search_text = query.replace(' ', '%20')
     for country in countries:
-        url = f"https://www.vinted.{country}/catalog?search_text={search_text}&size_ids[]={size}&price_to={max_price}&condition_ids[]=1&status_ids[]=1&status_ids[]=2"  # Idealny stan
-        driver.get(url)
-        time.sleep(6)  # Load + anti-bot
-        items = driver.find_elements(By.CSS_SELECTOR, '.feed-grid__item')
-        for item in items[:6]:  # Top 6 na kraj
+        url = f"https://www.vinted.{country}/catalog?search_text={search_text}&size_ids[]={size}&price_to={max_price}&condition_ids[]=1&status_ids[]=1&status_ids[]=2"
+        page.goto(url, wait_until='networkidle')
+        time.sleep(3)
+        items = page.query_selector_all('.feed-grid__item')
+        for item in items[:6]:
             try:
-                title = item.find_element(By.CSS_SELECTOR, '.new-item-box__title').text
-                price_str = item.find_element(By.CSS_SELECTOR, '.new-item-box__price').text
+                title = item.query_selector('.new-item-box__title').inner_text()
+                price_str = item.query_selector('.new-item-box__price').inner_text()
                 price = float(re.sub(r'[^\d.]', '', price_str))
-                link = item.find_element(By.CSS_SELECTOR, 'a').get_attribute('href')
-                img = item.find_element(By.CSS_SELECTOR, 'img').get_attribute('src')
-                likes = item.find_element(By.CSS_SELECTOR, '.new-item-box__favorites').text or "0"
-                seller = item.find_element(By.CSS_SELECTOR, '.new-item-box__seller').text
-                if query.lower() in title.lower() and price < max_price * 0.7:  # Zajebista <70% max
+                link = item.query_selector('a').get_attribute('href')
+                img = item.query_selector('img').get_attribute('src')
+                likes = item.query_selector('.new-item-box__favorites').inner_text() or "0"
+                seller = item.query_selector('.new-item-box__seller').inner_text()
+                if query.lower() in title.lower() and price < max_price * 0.7:
                     zysk = random.randint(int(price * 2), int(price * 5))
                     deals.append({
                         'title': title,
-                        'price': f"{price_str}",
-                        'link': link,
+                        'price': price_str,
+                        'link': f"https://www.vinted.{country}{link}",
                         'img': img,
                         'likes': likes,
                         'seller': seller,
                         'country': country.upper(),
-                        'zysk': f"{zysk}zł flip – x{ zysk // int(price) } zysku!"
+                        'zysk': f"{zysk}zł flip – x{zysk // int(price)} zysku!"
                     })
             except: pass
     deals.sort(key=lambda x: float(re.sub(r'[^\d.]', '', x['price'])))
-    return deals[:3]  # Top 3 global
+    return deals[:3]
 
 async def voice_alert(channel, text):
     tts = gTTS(text + " KUPOWANE NA VINTED, KURWA!", lang='pl')
@@ -96,13 +84,13 @@ async def universal_sniper():
     deals = search_product(current_search['query'], current_search['size'], current_search['max_price'])
     if not deals: return
     for deal in deals:
-        if float(re.sub(r'[^\d.]', '', deal['price'])) < current_search['max_price'] * 0.5:  # MEGA <50%
+        if float(re.sub(r'[^\d.]', '', deal['price'])) < current_search['max_price'] * 0.5:
             embed = discord.Embed(title=f"🚨 ZAJEBISTA OFERTA {current_search['query'].upper()} – {deal['country']}!", color=0xFF0000)
-            embed.add_field(name=f"{deal['title']}", value=f"Cena: **{deal['price']}**\nLikes: {deal['likes']}\nSprzedawca: {deal['seller']}\n**ZYSK FLIP: {deal['zysk']}**\n@everyone WSTAWAJ – PEREŁKA DLA CIEBIE!", inline=False)
+            embed.add_field(name=f"{deal['title']}", value=f"Cena: **{deal['price']}**\nLikes: {deal['likes']}\nSprzedawca: {deal['seller']}\n**ZYSK FLIP: {deal['zysk']}**\n@everyone WSTAWAJ – PEREŁKA!", inline=False)
             embed.set_image(url=deal['img'])
             view = View()
             view.add_item(Button(label="KUP NATYCHMIAST!", url=deal['link'], style=discord.ButtonStyle.danger))
-            await channel.send("@everyone MEGA OFERTA – SNIPER ZŁAPAŁ!", embed=embed, view=view)
+            await channel.send("@everyone MEGA OFERTA – PLAYWRIGHT ZŁAPAŁ!", embed=embed, view=view)
             await voice_alert(channel, f"ZAJEBISTA OFERTA {current_search['query']} za {deal['price']}")
 
 @bot.command()
@@ -113,20 +101,20 @@ async def szukaj(ctx, *, args):
     size = parts[-2] if len(parts) > 1 else "any"
     max_price = int(parts[-1]) if len(parts) > 0 and parts[-1].isdigit() else 200
     current_search = {"query": query, "size": size, "max_price": max_price}
-    await ctx.send(f"🔥 SNAJPER AKTYWNY NA **{query.upper()} ROZMIAR {size} MAX {max_price}zł** – alerty co 15 min jak perełka!")
-    await universal_sniper()  # Natychmiastowy scan
+    await ctx.send(f"🔥 PLAYWRIGHT SNAJPER AKTYWNY NA **{query.upper()} ROZMIAR {size} MAX {max_price}zł** – alerty co 15 min!")
+    await universal_sniper()
 
 @bot.command()
 async def stop(ctx):
     global current_search
     current_search = {"query": "", "size": "", "max_price": 200}
-    await ctx.send("🛑 SNAJPER WYŁĄCZONY – zero alertów!")
+    await ctx.send("🛑 SNAJPER WYŁĄCZONY!")
 
 @bot.event
 async def on_ready():
     global channel
     channel = bot.get_channel(CHANNEL_ID)
-    print(f'VINTED UNIVERSAL SNIPER ONLINE – CZEKA NA !szukaj [marka/model] [rozmiar] [max cena]!')
+    print('VINTED PLAYWRIGHT SNIPER ONLINE – ZERO CRASH, CZEKA NA !szukaj!')
     universal_sniper.start()
 
 bot.run(TOKEN)
