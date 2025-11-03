@@ -1,0 +1,6 @@
+discord.py
+selenium
+flask
+pytz
+gtts
+webdriver-manager
