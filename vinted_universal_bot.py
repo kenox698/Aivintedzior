@@ -1,7 +1,8 @@
 import discord
 from discord.ext import commands, tasks
 from discord.ui import Button, View
-from playwright.sync_api import sync_playwright
+import asyncio
+from playwright.async_api import async_playwright
 import os
 import random
 import threading
@@ -21,39 +22,44 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 channel = None
 current_search = {"query": "", "size": "", "max_price": 200}
+playwright = None
+browser = None
+context = None
 
 # === FLASK KEEP-ALIVE ===
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Vinted Playwright Sniper NIEŚMIERTELNY – jebie oferty 24/7!"
+def home(): return "Vinted Async Playwright Sniper NIEŚMIERTELNY – jebie oferty 24/7!"
 threading.Thread(target=app.run, args=('0.0.0.0', int(os.environ.get('PORT', 8080))), daemon=True).start()
 
-# === PLAYWRIGHT GLOBAL ===
-playwright = sync_playwright().start()
-browser = playwright.chromium.launch(headless=True)
-context = browser.new_context(viewport={'width': 1920, 'height': 1080})
-page = context.new_page()
+async def init_playwright():
+    global playwright, browser, context
+    playwright = await async_playwright().start()
+    await playwright.chromium.launch(headless=True)  # Force init
+    browser = await playwright.chromium.launch(headless=True)
+    context = await browser.new_context(viewport={'width': 1920, 'height': 1080})
 
 # === KRAJE VINTED ===
 countries = ['pl', 'de', 'fr', 'gb', 'es', 'it', 'nl', 'be', 'at', 'cz']
 
-def search_product(query, size, max_price):
+async def search_product(query, size, max_price):
     deals = []
     search_text = query.replace(' ', '%20')
+    page = await context.new_page()
     for country in countries:
         url = f"https://www.vinted.{country}/catalog?search_text={search_text}&size_ids[]={size}&price_to={max_price}&condition_ids[]=1&status_ids[]=1&status_ids[]=2"
-        page.goto(url, wait_until='networkidle')
-        time.sleep(3)
-        items = page.query_selector_all('.feed-grid__item')
+        await page.goto(url, wait_until='networkidle')
+        await page.wait_for_timeout(3000)
+        items = await page.query_selector_all('.feed-grid__item')
         for item in items[:6]:
             try:
-                title = item.query_selector('.new-item-box__title').inner_text()
-                price_str = item.query_selector('.new-item-box__price').inner_text()
+                title = await item.query_selector('.new-item-box__title').inner_text()
+                price_str = await item.query_selector('.new-item-box__price').inner_text()
                 price = float(re.sub(r'[^\d.]', '', price_str))
-                link = item.query_selector('a').get_attribute('href')
-                img = item.query_selector('img').get_attribute('src')
-                likes = item.query_selector('.new-item-box__favorites').inner_text() or "0"
-                seller = item.query_selector('.new-item-box__seller').inner_text()
+                link = await item.query_selector('a').get_attribute('href')
+                img = await item.query_selector('img').get_attribute('src')
+                likes = await item.query_selector('.new-item-box__favorites').inner_text() or "0"
+                seller = await item.query_selector('.new-item-box__seller').inner_text()
                 if query.lower() in title.lower() and price < max_price * 0.7:
                     zysk = random.randint(int(price * 2), int(price * 5))
                     deals.append({
@@ -67,6 +73,7 @@ def search_product(query, size, max_price):
                         'zysk': f"{zysk}zł flip – x{zysk // int(price)} zysku!"
                     })
             except: pass
+    await page.close()
     deals.sort(key=lambda x: float(re.sub(r'[^\d.]', '', x['price'])))
     return deals[:3]
 
@@ -81,7 +88,7 @@ async def universal_sniper():
     global channel
     if not channel: channel = bot.get_channel(CHANNEL_ID)
     if not current_search['query']: return
-    deals = search_product(current_search['query'], current_search['size'], current_search['max_price'])
+    deals = await search_product(current_search['query'], current_search['size'], current_search['max_price'])
     if not deals: return
     for deal in deals:
         if float(re.sub(r'[^\d.]', '', deal['price'])) < current_search['max_price'] * 0.5:
@@ -90,7 +97,7 @@ async def universal_sniper():
             embed.set_image(url=deal['img'])
             view = View()
             view.add_item(Button(label="KUP NATYCHMIAST!", url=deal['link'], style=discord.ButtonStyle.danger))
-            await channel.send("@everyone MEGA OFERTA – PLAYWRIGHT ZŁAPAŁ!", embed=embed, view=view)
+            await channel.send("@everyone MEGA OFERTA – ASYNC PLAYWRIGHT ZŁAPAŁ!", embed=embed, view=view)
             await voice_alert(channel, f"ZAJEBISTA OFERTA {current_search['query']} za {deal['price']}")
 
 @bot.command()
@@ -101,7 +108,7 @@ async def szukaj(ctx, *, args):
     size = parts[-2] if len(parts) > 1 else "any"
     max_price = int(parts[-1]) if len(parts) > 0 and parts[-1].isdigit() else 200
     current_search = {"query": query, "size": size, "max_price": max_price}
-    await ctx.send(f"🔥 PLAYWRIGHT SNAJPER AKTYWNY NA **{query.upper()} ROZMIAR {size} MAX {max_price}zł** – alerty co 15 min!")
+    await ctx.send(f"🔥 ASYNC PLAYWRIGHT SNAJPER AKTYWNY NA **{query.upper()} ROZMIAR {size} MAX {max_price}zł** – alerty co 15 min!")
     await universal_sniper()
 
 @bot.command()
@@ -114,7 +121,8 @@ async def stop(ctx):
 async def on_ready():
     global channel
     channel = bot.get_channel(CHANNEL_ID)
-    print('VINTED PLAYWRIGHT SNIPER ONLINE – ZERO CRASH, CZEKA NA !szukaj!')
+    await init_playwright()  # INIT PLAYWRIGHT W RUNTIME!
+    print('VINTED ASYNC PLAYWRIGHT SNIPER ONLINE – ZERO CRASH, CZEKA NA !szukaj!')
     universal_sniper.start()
 
 bot.run(TOKEN)
