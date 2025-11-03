@@ -1,9 +1,11 @@
 import discord
 from discord.ext import commands, tasks
 from discord.ui import Button, View
-import selenium.webdriver as webdriver
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from webdriver_manager.chrome import ChromeDriverManager  # AUTO POBIERA CHROMEDRIVER – ZERO CRASH!
 import os
 import random
 import threading
@@ -27,24 +29,31 @@ current_search = {"query": "", "size": "", "max_price": 200}  # Default
 # === FLASK KEEP-ALIVE ===
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Vinted Universal Sniper żyje i jebie dowolne oferty 24/7, kurwa!"
+def home(): return "Vinted Universal Sniper NIEŚMIERTELNY – jebie oferty 24/7, kurwa!"
 threading.Thread(target=app.run, args=('0.0.0.0', int(os.environ.get('PORT', 8080))), daemon=True).start()
 
-# === SELENIUM SETUP ===
-options = Options()
-options.add_argument('--headless')
-options.add_argument('--no-sandbox')
-options.add_argument('--disable-dev-shm-usage')
-driver = webdriver.Chrome(options=options)
+# === SELENIUM Z AUTO-DRIVER ===
+def get_driver():
+    options = Options()
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-gpu')
+    options.add_argument('--remote-debugging-port=9222')
+    service = Service(ChromeDriverManager().install())  # AUTO DOWNLOAD CHROMEDRIVER!
+    driver = webdriver.Chrome(service=service, options=options)
+    return driver
+
+driver = get_driver()  # INIT RAZ – BOT NIEŚMIERTELNY!
 
 # === KRAJE VINTED ===
-countries = ['pl', 'de', 'fr', 'gb', 'es', 'it', 'nl', 'be', 'at', 'cz']  # Więcej EU!
+countries = ['pl', 'de', 'fr', 'gb', 'es', 'it', 'nl', 'be', 'at', 'cz']  # GLOBAL EU!
 
 def search_product(query, size, max_price):
     deals = []
     search_text = query.replace(' ', '%20')
     for country in countries:
-        url = f"https://www.vinted.{country}/catalog?search_text={search_text}&size_ids[]={size}&price_to={max_price}&condition_ids[]=1&status_ids[]=1&status_ids[]=2"  # Idealny stan, nowy/używany lekko
+        url = f"https://www.vinted.{country}/catalog?search_text={search_text}&size_ids[]={size}&price_to={max_price}&condition_ids[]=1&status_ids[]=1&status_ids[]=2"  # Idealny stan
         driver.get(url)
         time.sleep(6)  # Load + anti-bot
         items = driver.find_elements(By.CSS_SELECTOR, '.feed-grid__item')
@@ -87,7 +96,7 @@ async def universal_sniper():
     deals = search_product(current_search['query'], current_search['size'], current_search['max_price'])
     if not deals: return
     for deal in deals:
-        if float(re.sub(r'[^\d.]', '', deal['price'])) < current_search['max_price'] * 0.5:  # MEGA ZAJEBISTA <50%
+        if float(re.sub(r'[^\d.]', '', deal['price'])) < current_search['max_price'] * 0.5:  # MEGA <50%
             embed = discord.Embed(title=f"🚨 ZAJEBISTA OFERTA {current_search['query'].upper()} – {deal['country']}!", color=0xFF0000)
             embed.add_field(name=f"{deal['title']}", value=f"Cena: **{deal['price']}**\nLikes: {deal['likes']}\nSprzedawca: {deal['seller']}\n**ZYSK FLIP: {deal['zysk']}**\n@everyone WSTAWAJ – PEREŁKA DLA CIEBIE!", inline=False)
             embed.set_image(url=deal['img'])
